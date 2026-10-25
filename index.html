@@ -55,6 +55,10 @@ td.code { font-family: var(--mono); font-size: 13px; }
 footer { font-size: 13px; color: var(--muted); }
 footer a { color: inherit; }
 .err { color: var(--bad); font-size: 13px; }
+.key { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; white-space: nowrap; color: var(--fg); }
+.key i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+.method { margin: 0; padding-left: 18px; font-size: 14px; max-width: 75ch; }
+.method li + li { margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -65,15 +69,16 @@ footer a { color: inherit; }
   </header>
 
   <section class="tiles">
-    <div class="card"><div class="label">Ônibus rodando</div><div class="num" id="t-bus">—</div><div class="sub" id="t-bus-s">&nbsp;</div></div>
-    <div class="card"><div class="label">Linhas com ônibus</div><div class="num" id="t-lin">—</div><div class="sub">linha + sentido, como a SPTrans conta</div></div>
-    <div class="card"><div class="label">Pico registrado</div><div class="num" id="t-pk">—</div><div class="sub" id="t-pk-s">&nbsp;</div></div>
+    <div class="card"><div class="label">Ônibus em movimento</div><div class="num" id="t-mov">—</div><div class="sub" id="t-mov-s">&nbsp;</div></div>
+    <div class="card"><div class="label">Ônibus ligados</div><div class="num" id="t-bus">—</div><div class="sub" id="t-bus-s">&nbsp;</div></div>
+    <div class="card"><div class="label">Linhas com ônibus</div><div class="num" id="t-lin">—</div><div class="sub">linhas distintas, os dois sentidos juntos</div></div>
     <div class="card"><div class="label">Leituras coletadas</div><div class="num" id="t-n">—</div><div class="sub" id="t-n-s">&nbsp;</div></div>
   </section>
 
   <section class="card" id="serie">
     <h2>Ônibus em circulação</h2>
-    <p class="note">Veículos com posição no Olho Vivo, lidos a cada 3 minutos (horário de Brasília). Buracos na linha são períodos sem coleta.</p>
+    <p class="note"><span class="key"><i style="background:var(--accent)"></i>Em movimento</span><span class="key"><i style="background:var(--muted)"></i>Ligados (inclui parados)</span><br>
+      Leituras a cada 3 minutos, horário de Brasília. Buracos na linha são períodos sem coleta.</p>
     <div class="chart" id="c-serie"></div>
   </section>
 
@@ -85,9 +90,9 @@ footer a { color: inherit; }
 
   <section class="card" id="leituras">
     <h2>Últimas leituras</h2>
-    <p class="note">As 30 leituras mais recentes. A variação compara com a leitura anterior; "—" quando houve intervalo sem coleta.</p>
+    <p class="note">As 30 leituras mais recentes. A variação é dos ônibus em movimento, contra a leitura anterior; "—" quando não há como comparar.</p>
     <div class="tablewrap"><table>
-      <thead><tr><th>Horário</th><th class="n">Ônibus</th><th class="n">Linhas</th><th class="n">Variação</th></tr></thead>
+      <thead><tr><th>Horário</th><th class="n">Em movimento</th><th class="n">Ligados</th><th class="n">Linhas</th><th class="n">Variação</th></tr></thead>
       <tbody id="b-leit"></tbody>
     </table></div>
   </section>
@@ -111,6 +116,16 @@ footer a { color: inherit; }
     </section>
   </div>
 
+  <section class="card" id="metodo">
+    <h2>Como contamos</h2>
+    <ul class="method">
+      <li><b>Ligados:</b> ônibus que o Olho Vivo lista numa linha, com GPS ativo. Inclui os parados em ponto final e exclui os que estão na garagem.</li>
+      <li><b>Em movimento:</b> ligados, com posição de no máximo 3 minutos, que andaram pelo menos 50 m desde a leitura anterior. Só é calculado quando a leitura anterior tem até 6 minutos.</li>
+      <li><b>Linhas:</b> letreiros distintos (campo <code>c</code>). A API lista cada sentido separado, o que dobraria a conta.</li>
+      <li>Cada leitura é uma foto simultânea, nunca o total de ônibus que rodou no dia. Método baseado em <a href="https://github.com/travahacker/analise-onibus#armadilhas-conhecidas">travahacker/analise-onibus</a>.</li>
+    </ul>
+  </section>
+
   <footer>
     Fontes: API Olho Vivo (SPTrans) pelo gateway <a href="https://apilib.prefeitura.sp.gov.br/store/">apilib da Prefeitura</a>;
     <a href="https://prefeitura.sp.gov.br/web/mobilidade/w/passageiros-transportados-2026">Passageiros Transportados</a> (SPTrans).
@@ -132,6 +147,13 @@ footer a { color: inherit; }
   const bust = '?v=' + Math.floor(Date.now() / 300000);
 
   let totais = [], linhas = [], pax = [];
+  const share = (p) => Math.round(p.mv / p.v * 100) + '%';
+  // change in moving buses when both readings have it, else in buses switched on
+  const delta = (p, prev) => {
+    if (!prev || p.t - prev.t > 10 * 6e4) return null;
+    if (p.mv != null) return prev.mv != null ? p.mv - prev.mv : null;
+    return p.v - prev.v;
+  };
 
   function tooltip(box) { const t = document.createElement('div'); t.className = 'tip'; t.hidden = true; box.appendChild(t); return t; }
   function place(tip, box, px, py) {
@@ -154,19 +176,19 @@ footer a { color: inherit; }
     const ok = totais;
     if (!ok.length) { $('lede').textContent = 'Ainda não há leituras.'; return; }
     const last = ok[ok.length - 1];
-    const peak = ok.reduce((a, r) => (r.v > a.v ? r : a), ok[0]);
+    const lm = last.mv == null ? null : last;
+    $('t-mov').textContent = lm ? nf.format(lm.mv) : '—';
+    $('t-mov-s').textContent = lm ? share(lm) + ' dos ligados, leitura de ' + fHora.format(lm.t) : 'aparece a partir da próxima leitura';
     $('t-bus').textContent = nf.format(last.v);
-    $('t-bus-s').textContent = 'leitura de ' + fDiaHora.format(last.t);
+    $('t-bus-s').textContent = 'inclui parados, leitura de ' + fHora.format(last.t);
     $('t-lin').textContent = nf.format(last.l);
-    $('t-pk').textContent = nf.format(peak.v);
-    $('t-pk-s').textContent = 'em ' + fDiaHora.format(peak.t);
     $('t-n').textContent = nf.format(ok.length);
     $('t-n-s').textContent = 'desde ' + fDiaHora.format(ok[0].t);
     const lede = $('lede'); lede.textContent = '';
-    const b1 = document.createElement('b'); b1.textContent = nf.format(last.v);
-    const b2 = document.createElement('b'); b2.textContent = nf.format(last.l);
-    lede.append('Na última leitura (' + fDiaHora.format(last.t) + ') rodavam ', b1, ' ônibus em ', b2,
-      ' linhas, segundo o Olho Vivo da SPTrans. Abaixo, a série coletada a cada 3 minutos e o histórico oficial de passageiros por dia.');
+    const b = (v) => { const e = document.createElement('b'); e.textContent = nf.format(v); return e; };
+    if (lm) lede.append('Na última leitura (' + fDiaHora.format(last.t) + ') havia ', b(last.mv), ' ônibus em movimento, de ', b(last.v), ' ligados em ', b(last.l), ' linhas');
+    else lede.append('Na última leitura (' + fDiaHora.format(last.t) + ') havia ', b(last.v), ' ônibus ligados em ', b(last.l), ' linhas');
+    lede.append(', segundo o Olho Vivo da SPTrans. Abaixo, a série coletada a cada 3 minutos e o histórico oficial de passageiros por dia.');
     $('f-upd').textContent = 'Última leitura: ' + fDiaHora.format(last.t) + '.';
   }
 
@@ -177,7 +199,7 @@ footer a { color: inherit; }
     let span = d3.extent(totais, (p) => p.t);
     if (+span[0] === +span[1]) span = [new Date(+span[0] - 18e5), new Date(+span[1] + 18e5)];
     // zoom to the data range so small changes between readings are visible
-    const [vmin, vmax] = d3.extent(totais, (p) => p.v), pad = Math.max(50, (vmax - vmin) * 0.15);
+    const [vmin, vmax] = d3.extent(totais.flatMap((p) => (p.mv == null ? [p.v] : [p.v, p.mv]))), pad = Math.max(50, (vmax - vmin) * 0.15);
     const y = d3.scaleLinear([Math.max(0, vmin - pad), vmax + pad], [H - m.b, m.t]).nice();
     const svg = d3.select(box).append('svg').attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
     m.l = leftMargin(svg, nf.format(y.domain()[1]));
@@ -188,26 +210,31 @@ footer a { color: inherit; }
       svg.append('text').attr('x', x(t)).attr('y', H - 8).attr('text-anchor', 'middle').attr('font-size', 12)
         .attr('fill', css('--muted')).text(multi ? fDiaHora.format(t) : fHora.format(t));
     });
-    const series = [];
-    totais.forEach((p, i) => { if (i && p.t - totais[i - 1].t > 10 * 6e4) series.push({ gap: true }); series.push(p); });
-    const acc = css('--accent');
-    svg.append('path').attr('fill', css('--accent-soft'))
-      .attr('d', d3.area().defined((p) => !p.gap).x((p) => x(p.t)).y0(H - m.b).y1((p) => y(p.v))(series));
-    svg.append('path').attr('fill', 'none').attr('stroke', acc).attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
-      .attr('d', d3.line().defined((p) => !p.gap).x((p) => x(p.t)).y((p) => y(p.v))(series));
+    const acc = css('--accent'), grey = css('--muted');
     // one marker per reading; smaller when readings are packed tight
     const step = (W - m.l - m.r) / Math.max(1, (span[1] - span[0]) / 18e4);
     const r0 = step >= 8 ? 3.5 : step >= 4 ? 2.5 : 1.5;
-    svg.append('g').selectAll('circle').data(totais).join('circle')
-      .attr('cx', (p) => x(p.t)).attr('cy', (p) => y(p.v)).attr('r', r0)
-      .attr('fill', css('--panel')).attr('stroke', acc).attr('stroke-width', 1.5);
-    const last = totais[totais.length - 1];
-    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 5).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2);
+    const plot = (key, color, width, fill) => {
+      const pts = totais.filter((p) => p[key] != null), s = [];
+      pts.forEach((p, i) => { if (i && p.t - pts[i - 1].t > 10 * 6e4) s.push({ gap: true }); s.push(p); });
+      if (fill) svg.append('path').attr('fill', fill)
+        .attr('d', d3.area().defined((p) => !p.gap).x((p) => x(p.t)).y0(H - m.b).y1((p) => y(p[key]))(s));
+      svg.append('path').attr('fill', 'none').attr('stroke', color).attr('stroke-width', width).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
+        .attr('d', d3.line().defined((p) => !p.gap).x((p) => x(p.t)).y((p) => y(p[key]))(s));
+      svg.append('g').selectAll('circle').data(pts).join('circle')
+        .attr('cx', (p) => x(p.t)).attr('cy', (p) => y(p[key])).attr('r', r0)
+        .attr('fill', css('--panel')).attr('stroke', color).attr('stroke-width', 1.5);
+      const last = pts[pts.length - 1];
+      if (last) svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last[key])).attr('r', 5).attr('fill', color).attr('stroke', css('--panel')).attr('stroke-width', 2);
+    };
+    plot('v', grey, 1.5, null);
+    plot('mv', acc, 2, css('--accent-soft'));
 
     // hover / tap: vertical rule, highlighted marker, time pill on the x axis, tooltip
     const rule = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).attr('stroke', css('--muted'))
       .attr('stroke-dasharray', '3 3').attr('visibility', 'hidden');
-    const dot = svg.append('circle').attr('r', 6).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2).attr('visibility', 'hidden');
+    const dot = svg.append('circle').attr('r', 6).attr('fill', grey).attr('stroke', css('--panel')).attr('stroke-width', 2).attr('visibility', 'hidden');
+    const dotM = svg.append('circle').attr('r', 6).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2).attr('visibility', 'hidden');
     const pill = svg.append('g').attr('visibility', 'hidden');
     const pillBg = pill.append('rect').attr('rx', 4).attr('height', 20).attr('y', H - 24).attr('fill', css('--fg'));
     const pillTx = pill.append('text').attr('y', H - 10).attr('text-anchor', 'middle').attr('font-size', 12).attr('fill', css('--panel'));
@@ -217,24 +244,28 @@ footer a { color: inherit; }
       const px = x(p.t);
       rule.attr('x1', px).attr('x2', px).attr('visibility', 'visible');
       dot.attr('cx', px).attr('cy', y(p.v)).attr('visibility', 'visible');
+      if (p.mv != null) dotM.attr('cx', px).attr('cy', y(p.mv)).attr('visibility', 'visible'); else dotM.attr('visibility', 'hidden');
       pillTx.text(fHora.format(p.t));
       const w = pillTx.node().getComputedTextLength() + 12;
       const cx = Math.min(Math.max(px, m.l + w / 2), W - m.r - w / 2);
       pillTx.attr('x', cx); pillBg.attr('x', cx - w / 2).attr('width', w); pill.attr('visibility', 'visible');
       tip.innerHTML = '';
       const a = document.createElement('div'); a.className = 't'; a.textContent = fDiaHora.format(p.t);
-      const b = document.createElement('div'); b.textContent = nf.format(p.v) + ' ônibus · ' + nf.format(p.l) + ' linhas';
-      tip.append(a, b);
-      if (prev && p.t - prev.t <= 10 * 6e4) {
-        const d = p.v - prev.v, c = document.createElement('div');
-        c.textContent = (d > 0 ? '+' : '') + nf.format(d) + ' desde ' + fHora.format(prev.t);
+      tip.append(a);
+      if (p.mv != null) { const e = document.createElement('div'); e.textContent = nf.format(p.mv) + ' em movimento (' + share(p) + ')'; e.style.color = acc; tip.append(e); }
+      const b = document.createElement('div'); b.textContent = nf.format(p.v) + ' ligados · ' + nf.format(p.l) + ' linhas';
+      tip.append(b);
+      const d = delta(p, prev);
+      if (d !== null) {
+        const c = document.createElement('div');
+        c.textContent = (d > 0 ? '+' : '') + nf.format(d) + (p.mv != null ? ' em movimento' : ' ligados') + ' desde ' + fHora.format(prev.t);
         c.style.color = d < 0 ? css('--bad') : css('--good'); tip.append(c);
       }
       tip.hidden = false;
       const s = box.clientWidth / W; place(tip, box, px * s, y(p.v) * s);
     };
     svg.style('touch-action', 'pan-y').on('pointermove', show).on('pointerdown', show)
-      .on('pointerleave', () => { tip.hidden = true; [dot, rule, pill].forEach((e) => e.attr('visibility', 'hidden')); });
+      .on('pointerleave', () => { tip.hidden = true; [dot, dotM, rule, pill].forEach((e) => e.attr('visibility', 'hidden')); });
     drawLeituras();
   }
 
@@ -242,11 +273,11 @@ footer a { color: inherit; }
     const tb = $('b-leit'); tb.innerHTML = '';
     totais.slice(-30).reverse().forEach((p, i, arr) => {
       const prev = arr[i + 1], tr = document.createElement('tr');
-      const d = prev && p.t - prev.t <= 10 * 6e4 ? p.v - prev.v : null;
-      [[fDiaHora.format(p.t)], [nf.format(p.v), 'n'], [nf.format(p.l), 'n'], [d === null ? '—' : (d > 0 ? '+' : '') + nf.format(d), 'n']].forEach(([v, c]) => {
+      const d = p.mv != null && prev && prev.mv != null && p.t - prev.t <= 10 * 6e4 ? p.mv - prev.mv : null;
+      [[fDiaHora.format(p.t)], [p.mv == null ? '—' : nf.format(p.mv), 'n'], [nf.format(p.v), 'n'], [nf.format(p.l), 'n'], [d === null ? '—' : (d > 0 ? '+' : '') + nf.format(d), 'n']].forEach(([v, c]) => {
         const td = document.createElement('td'); td.textContent = v; if (c) td.className = c; tr.appendChild(td);
       });
-      if (d) tr.children[3].style.color = d < 0 ? css('--bad') : css('--good');
+      if (d) tr.children[4].style.color = d < 0 ? css('--bad') : css('--good');
       tb.appendChild(tr);
     });
   }
@@ -308,7 +339,7 @@ footer a { color: inherit; }
   Promise.all([
     d3.csv('data/totais.csv' + bust), d3.csv('data/linhas-agora.csv' + bust), d3.csv('data/passageiros-diarios.csv' + bust),
   ]).then(([t, l, p]) => {
-    totais = t.filter((r) => r.hr_sp !== 'ERROR' && r.buses).map((r) => ({ t: new Date(r.ts_utc), v: +r.buses, l: +r.lines }));
+    totais = t.filter((r) => r.hr_sp !== 'ERROR' && r.buses).map((r) => ({ t: new Date(r.ts_utc), v: +r.buses, l: +r.lines, mv: r.moving === '' || r.moving == null ? null : +r.moving }));
     linhas = l.map((r) => ({ t: new Date(r.ts_utc), linha: r.linha, n: +r.onibus }));
     pax = p.map((r) => ({ ...r, t: new Date(r.data + 'T00:00:00Z'), p: +r.passageiros, dv: +r.desvio_pct }));
     drawAll();
