@@ -189,7 +189,7 @@ footer a { color: inherit; }
         .attr('fill', css('--muted')).text(multi ? fDiaHora.format(t) : fHora.format(t));
     });
     const series = [];
-    totais.forEach((p, i) => { if (i && p.t - totais[i - 1].t > 15 * 6e4) series.push({ gap: true }); series.push(p); });
+    totais.forEach((p, i) => { if (i && p.t - totais[i - 1].t > 10 * 6e4) series.push({ gap: true }); series.push(p); });
     const acc = css('--accent');
     svg.append('path').attr('fill', css('--accent-soft'))
       .attr('d', d3.area().defined((p) => !p.gap).x((p) => x(p.t)).y0(H - m.b).y1((p) => y(p.v))(series));
@@ -225,7 +225,7 @@ footer a { color: inherit; }
       const a = document.createElement('div'); a.className = 't'; a.textContent = fDiaHora.format(p.t);
       const b = document.createElement('div'); b.textContent = nf.format(p.v) + ' ônibus · ' + nf.format(p.l) + ' linhas';
       tip.append(a, b);
-      if (prev && p.t - prev.t <= 15 * 6e4) {
+      if (prev && p.t - prev.t <= 10 * 6e4) {
         const d = p.v - prev.v, c = document.createElement('div');
         c.textContent = (d > 0 ? '+' : '') + nf.format(d) + ' desde ' + fHora.format(prev.t);
         c.style.color = d < 0 ? css('--bad') : css('--good'); tip.append(c);
@@ -242,7 +242,7 @@ footer a { color: inherit; }
     const tb = $('b-leit'); tb.innerHTML = '';
     totais.slice(-30).reverse().forEach((p, i, arr) => {
       const prev = arr[i + 1], tr = document.createElement('tr');
-      const d = prev && p.t - prev.t <= 15 * 6e4 ? p.v - prev.v : null;
+      const d = prev && p.t - prev.t <= 10 * 6e4 ? p.v - prev.v : null;
       [[fDiaHora.format(p.t)], [nf.format(p.v), 'n'], [nf.format(p.l), 'n'], [d === null ? '—' : (d > 0 ? '+' : '') + nf.format(d), 'n']].forEach(([v, c]) => {
         const td = document.createElement('td'); td.textContent = v; if (c) td.className = c; tr.appendChild(td);
       });
