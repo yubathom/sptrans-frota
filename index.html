@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frota de Ônibus SP</title>
+<meta name="description" content="Quantos ônibus rodam agora em São Paulo, segundo o Olho Vivo da SPTrans, e o histórico de passageiros por dia.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400&display=swap">
+<style>
+/* Layout: one column of cards, numbers first, then time series, then detail tables. */
+:root {
+  --bg: #f3f5f2; --panel: #ffffff; --fg: #17201b; --muted: #5d6b63; --line: #dbe1dc;
+  --accent: #0b7a53; --accent-soft: #0b7a5333; --bad: #c2412d; --good: #1d7f3f; --bar: #b9c4bd;
+  --display: "Fraunces", Georgia, serif; --body: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111613; --panel: #1a211d; --fg: #e6ece8; --muted: #9aa8a0; --line: #2c3631;
+  --accent: #3ccf93; --accent-soft: #3ccf9333; --bad: #ef7a64; --good: #5fcf86; --bar: #4a5650; color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #111613; --panel: #1a211d; --fg: #e6ece8; --muted: #9aa8a0; --line: #2c3631;
+  --accent: #3ccf93; --accent-soft: #3ccf9333; --bad: #ef7a64; --good: #5fcf86; --bar: #4a5650; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+.wrap { max-width: 1080px; margin-inline: auto; padding-block: 32px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px; }
+h1 { font: 600 clamp(28px, 5vw, 40px)/1.1 var(--display); margin: 0; text-wrap: balance; }
+.lede { color: var(--muted); margin: 8px 0 0; max-width: 65ch; }
+.lede b { color: var(--fg); font-weight: 500; font-variant-numeric: tabular-nums; }
+.tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; min-width: 0; }
+.label { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.num { font: 400 34px/1.15 var(--display); font-variant-numeric: tabular-nums; margin-top: 6px; }
+.sub { font-size: 13px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+h2 { font: 500 17px/1.3 var(--body); margin: 0; }
+.note { font-size: 13px; color: var(--muted); margin: 4px 0 14px; max-width: 75ch; }
+.chart { position: relative; min-height: 260px; }
+.chart svg { display: block; }
+.tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 4px 16px #0002; padding: 6px 10px; font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tip .t { color: var(--muted); }
+.tablewrap { max-height: 420px; overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 500; font-size: 12px; color: var(--muted);
+  padding: 6px 10px; border-bottom: 1px solid var(--line); }
+td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+td.n, th.n { text-align: right; }
+td.code { font-family: var(--mono); font-size: 13px; }
+.bar { height: 8px; border-radius: 4px; background: var(--bar); min-width: 2px; }
+.bar.top { background: var(--accent); }
+.two { display: grid; gap: 20px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+footer { font-size: 13px; color: var(--muted); }
+footer a { color: inherit; }
+.err { color: var(--bad); font-size: 13px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>Frota de ônibus em São Paulo</h1>
+    <p class="lede" id="lede">Carregando os dados…</p>
+  </header>
+
+  <section class="tiles">
+    <div class="card"><div class="label">Ônibus rodando</div><div class="num" id="t-bus">—</div><div class="sub" id="t-bus-s">&nbsp;</div></div>
+    <div class="card"><div class="label">Linhas com ônibus</div><div class="num" id="t-lin">—</div><div class="sub">linha + sentido, como a SPTrans conta</div></div>
+    <div class="card"><div class="label">Pico registrado</div><div class="num" id="t-pk">—</div><div class="sub" id="t-pk-s">&nbsp;</div></div>
+    <div class="card"><div class="label">Leituras coletadas</div><div class="num" id="t-n">—</div><div class="sub" id="t-n-s">&nbsp;</div></div>
+  </section>
+
+  <section class="card" id="serie">
+    <h2>Ônibus em circulação</h2>
+    <p class="note">Veículos com posição no Olho Vivo, lidos a cada 5 minutos (horário de Brasília). Buracos na linha são períodos sem coleta.</p>
+    <div class="chart" id="c-serie"></div>
+  </section>
+
+  <section class="card" id="historico">
+    <h2>Passageiros por dia, dados oficiais da SPTrans</h2>
+    <p class="note">A SPTrans publica com cerca de duas semanas de atraso. Barras coloridas: dias mais de 10% fora da mediana do mesmo dia da semana (vermelho abaixo, verde acima).</p>
+    <div class="chart" id="c-hist"></div>
+  </section>
+
+  <div class="two">
+    <section class="card" id="anomalias">
+      <h2>Dias fora do padrão</h2>
+      <p class="note">A greve na zona sul em 19/out (lote D10) ainda não aparece nos dados publicados.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Data</th><th class="n">Passageiros</th><th class="n">Desvio</th><th>Motivo</th></tr></thead>
+        <tbody id="b-anom"></tbody>
+      </table></div>
+    </section>
+    <section class="card" id="linhas">
+      <h2>Linhas com mais ônibus agora</h2>
+      <p class="note" id="l-note">Última leitura, somando os dois sentidos.</p>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Linha</th><th class="n">Ônibus</th><th style="width:45%"></th></tr></thead>
+        <tbody id="b-lin"></tbody>
+      </table></div>
+    </section>
+  </div>
+
+  <footer>
+    Fontes: API Olho Vivo (SPTrans) pelo gateway <a href="https://apilib.prefeitura.sp.gov.br/store/">apilib da Prefeitura</a>;
+    <a href="https://prefeitura.sp.gov.br/web/mobilidade/w/passageiros-transportados-2026">Passageiros Transportados</a> (SPTrans).
+    Atualizado de hora em hora. <span id="f-upd"></span>
+  </footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script>
+(function () {
+  const SP = 'America/Sao_Paulo';
+  const fHora = new Intl.DateTimeFormat('pt-BR', { timeZone: SP, hour: '2-digit', minute: '2-digit' });
+  const fDiaHora = new Intl.DateTimeFormat('pt-BR', { timeZone: SP, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  const fDia = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', day: '2-digit', month: '2-digit' });
+  const nf = new Intl.NumberFormat('pt-BR');
+  const pct = (v) => (v > 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '%';
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const $ = (id) => document.getElementById(id);
+  const bust = '?v=' + Math.floor(Date.now() / 300000);
+
+  let totais = [], linhas = [], pax = [];
+
+  function tooltip(box) { const t = document.createElement('div'); t.className = 'tip'; t.hidden = true; box.appendChild(t); return t; }
+  function place(tip, box, px, py) {
+    tip.style.left = Math.min(Math.max(px - tip.offsetWidth / 2, 0), box.clientWidth - tip.offsetWidth) + 'px';
+    tip.style.top = Math.max(py - tip.offsetHeight - 10, 0) + 'px';
+  }
+  function yAxis(svg, y, m, W, fmt) {
+    y.ticks(5).forEach((t) => {
+      svg.append('line').attr('x1', m.l).attr('x2', W - m.r).attr('y1', y(t)).attr('y2', y(t)).attr('stroke', css('--line'));
+      svg.append('text').attr('x', m.l - 6).attr('y', y(t)).attr('dy', '0.32em').attr('text-anchor', 'end')
+        .attr('font-size', 12).attr('fill', css('--muted')).text(fmt(t));
+    });
+  }
+  function leftMargin(svg, label) {
+    const p = svg.append('text').attr('font-size', 12).text(label);
+    const w = p.node().getComputedTextLength(); p.remove(); return Math.ceil(w) + 12;
+  }
+
+  function drawResumo() {
+    const ok = totais;
+    if (!ok.length) { $('lede').textContent = 'Ainda não há leituras.'; return; }
+    const last = ok[ok.length - 1];
+    const peak = ok.reduce((a, r) => (r.v > a.v ? r : a), ok[0]);
+    $('t-bus').textContent = nf.format(last.v);
+    $('t-bus-s').textContent = 'leitura de ' + fDiaHora.format(last.t);
+    $('t-lin').textContent = nf.format(last.l);
+    $('t-pk').textContent = nf.format(peak.v);
+    $('t-pk-s').textContent = 'em ' + fDiaHora.format(peak.t);
+    $('t-n').textContent = nf.format(ok.length);
+    $('t-n-s').textContent = 'desde ' + fDiaHora.format(ok[0].t);
+    const lede = $('lede'); lede.textContent = '';
+    const b1 = document.createElement('b'); b1.textContent = nf.format(last.v);
+    const b2 = document.createElement('b'); b2.textContent = nf.format(last.l);
+    lede.append('Na última leitura (' + fDiaHora.format(last.t) + ') rodavam ', b1, ' ônibus em ', b2,
+      ' linhas, segundo o Olho Vivo da SPTrans. Abaixo, a série coletada a cada 5 minutos e o histórico oficial de passageiros por dia.');
+    $('f-upd').textContent = 'Última leitura: ' + fDiaHora.format(last.t) + '.';
+  }
+
+  function drawSerie() {
+    const box = $('c-serie'); box.innerHTML = '';
+    if (!totais.length) return;
+    const W = box.clientWidth || 600, H = 260, m = { t: 12, r: 16, b: 28, l: 0 };
+    let span = d3.extent(totais, (p) => p.t);
+    if (+span[0] === +span[1]) span = [new Date(+span[0] - 18e5), new Date(+span[1] + 18e5)];
+    const y = d3.scaleLinear([0, d3.max(totais, (p) => p.v) * 1.1], [H - m.b, m.t]).nice();
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+    m.l = leftMargin(svg, nf.format(y.domain()[1]));
+    const x = d3.scaleUtc(span, [m.l, W - m.r]);
+    yAxis(svg, y, m, W, (t) => nf.format(t));
+    const multi = span[1] - span[0] > 36 * 36e5;
+    x.ticks(Math.max(2, Math.floor((W - m.l - m.r) / 95))).forEach((t) => {
+      svg.append('text').attr('x', x(t)).attr('y', H - 8).attr('text-anchor', 'middle').attr('font-size', 12)
+        .attr('fill', css('--muted')).text(multi ? fDiaHora.format(t) : fHora.format(t));
+    });
+    const series = [];
+    totais.forEach((p, i) => { if (i && p.t - totais[i - 1].t > 15 * 6e4) series.push({ gap: true }); series.push(p); });
+    const acc = css('--accent');
+    svg.append('path').attr('fill', css('--accent-soft'))
+      .attr('d', d3.area().defined((p) => !p.gap).x((p) => x(p.t)).y0(H - m.b).y1((p) => y(p.v))(series));
+    svg.append('path').attr('fill', 'none').attr('stroke', acc).attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
+      .attr('d', d3.line().defined((p) => !p.gap).x((p) => x(p.t)).y((p) => y(p.v))(series));
+    const last = totais[totais.length - 1];
+    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 4.5).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2);
+    const dot = svg.append('circle').attr('r', 4).attr('fill', acc).attr('visibility', 'hidden');
+    const tip = tooltip(box), bis = d3.bisector((p) => p.t).center;
+    svg.on('pointermove', (ev) => {
+      const p = totais[bis(totais, x.invert(d3.pointer(ev)[0]))];
+      dot.attr('cx', x(p.t)).attr('cy', y(p.v)).attr('visibility', 'visible');
+      tip.innerHTML = '';
+      const a = document.createElement('div'); a.className = 't'; a.textContent = fDiaHora.format(p.t);
+      const b = document.createElement('div'); b.textContent = nf.format(p.v) + ' ônibus · ' + nf.format(p.l) + ' linhas';
+      tip.append(a, b); tip.hidden = false;
+      const s = box.clientWidth / W; place(tip, box, x(p.t) * s, y(p.v) * s);
+    }).on('pointerleave', () => { tip.hidden = true; dot.attr('visibility', 'hidden'); });
+  }
+
+  function drawHist() {
+    const box = $('c-hist'); box.innerHTML = ''; $('b-anom').innerHTML = '';
+    if (!pax.length) return;
+    const W = box.clientWidth || 600, H = 260, m = { t: 12, r: 8, b: 28, l: 52 };
+    const x = d3.scaleBand(pax.map((r) => r.data), [m.l, W - m.r]).padding(0.2);
+    const y = d3.scaleLinear([0, d3.max(pax, (r) => r.p)], [H - m.b, m.t]).nice();
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+    yAxis(svg, y, m, W, (t) => (t ? nf.format(t / 1e6) + ' mi' : '0'));
+    const every = Math.ceil(pax.length / Math.max(2, Math.floor((W - m.l - m.r) / 56)));
+    pax.forEach((r, i) => { if (i % every === 0) svg.append('text').attr('x', x(r.data) + x.bandwidth() / 2).attr('y', H - 8)
+      .attr('text-anchor', 'middle').attr('font-size', 12).attr('fill', css('--muted')).text(fDia.format(r.t)); });
+    const col = (r) => (r.dv <= -10 ? css('--bad') : r.dv >= 10 ? css('--good') : css('--bar'));
+    const tip = tooltip(box);
+    svg.append('g').selectAll('rect').data(pax).join('rect')
+      .attr('x', (r) => x(r.data)).attr('width', x.bandwidth()).attr('y', (r) => y(r.p)).attr('height', (r) => y(0) - y(r.p))
+      .attr('rx', Math.min(3, x.bandwidth() / 2)).attr('fill', col)
+      .on('pointerenter', (ev, r) => {
+        tip.innerHTML = '';
+        const a = document.createElement('div'); a.className = 't'; a.textContent = r.dia + ', ' + fDia.format(r.t);
+        const b = document.createElement('div'); b.textContent = nf.format(r.p) + ' passageiros (' + pct(r.dv) + ')';
+        tip.append(a, b);
+        if (r.evento) { const c = document.createElement('div'); c.textContent = r.evento; tip.append(c); }
+        tip.hidden = false;
+        const s = box.clientWidth / W; place(tip, box, (x(r.data) + x.bandwidth() / 2) * s, y(r.p) * s);
+      }).on('pointerleave', () => { tip.hidden = true; });
+
+    pax.filter((r) => Math.abs(r.dv) >= 10).sort((a, b) => Math.abs(b.dv) - Math.abs(a.dv)).forEach((r) => {
+      const tr = document.createElement('tr');
+      [[r.dia + ' ' + fDia.format(r.t)], [nf.format(r.p), 'n'], [pct(r.dv), 'n'], [r.evento || 'Sem explicação encontrada']].forEach(([v, c]) => {
+        const td = document.createElement('td'); td.textContent = v; if (c) td.className = c; tr.appendChild(td);
+      });
+      tr.children[2].style.color = r.dv < 0 ? css('--bad') : css('--good');
+      $('b-anom').appendChild(tr);
+    });
+  }
+
+  function drawLinhas() {
+    const tb = $('b-lin'); tb.innerHTML = '';
+    const rows = linhas.slice().sort((a, b) => b.n - a.n).slice(0, 25);
+    if (!rows.length) return;
+    $('l-note').textContent = 'Leitura de ' + fDiaHora.format(rows[0].t) + ', somando os dois sentidos. As 25 maiores.';
+    const max = rows[0].n;
+    rows.forEach((r, i) => {
+      const tr = document.createElement('tr');
+      const a = document.createElement('td'); a.className = 'code'; a.textContent = r.linha;
+      const b = document.createElement('td'); b.className = 'n'; b.textContent = nf.format(r.n);
+      const c = document.createElement('td'); const bar = document.createElement('div');
+      bar.className = 'bar' + (i < 3 ? ' top' : ''); bar.style.width = (r.n / max * 100) + '%'; c.appendChild(bar);
+      tr.append(a, b, c); tb.appendChild(tr);
+    });
+  }
+
+  function drawAll() { drawResumo(); drawSerie(); drawHist(); drawLinhas(); }
+
+  Promise.all([
+    d3.csv('data/totais.csv' + bust), d3.csv('data/linhas-agora.csv' + bust), d3.csv('data/passageiros-diarios.csv' + bust),
+  ]).then(([t, l, p]) => {
+    totais = t.filter((r) => r.hr_sp !== 'ERROR' && r.buses).map((r) => ({ t: new Date(r.ts_utc), v: +r.buses, l: +r.lines }));
+    linhas = l.map((r) => ({ t: new Date(r.ts_utc), linha: r.linha, n: +r.onibus }));
+    pax = p.map((r) => ({ ...r, t: new Date(r.data + 'T00:00:00Z'), p: +r.passageiros, dv: +r.desvio_pct }));
+    drawAll();
+    let w = innerWidth; addEventListener('resize', () => { if (innerWidth !== w) { w = innerWidth; drawAll(); } });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawAll);
+  }).catch(() => { $('lede').innerHTML = '<span class="err">Não foi possível carregar os dados. Tente recarregar a página.</span>'; });
+})();
+</script>
+</body>
+</html>
