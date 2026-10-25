@@ -83,6 +83,15 @@ footer a { color: inherit; }
     <div class="chart" id="c-hist"></div>
   </section>
 
+  <section class="card" id="leituras">
+    <h2>Últimas leituras</h2>
+    <p class="note">As 30 leituras mais recentes. A variação compara com a leitura anterior; "—" quando houve intervalo sem coleta.</p>
+    <div class="tablewrap"><table>
+      <thead><tr><th>Horário</th><th class="n">Ônibus</th><th class="n">Linhas</th><th class="n">Variação</th></tr></thead>
+      <tbody id="b-leit"></tbody>
+    </table></div>
+  </section>
+
   <div class="two">
     <section class="card" id="anomalias">
       <h2>Dias fora do padrão</h2>
@@ -157,7 +166,7 @@ footer a { color: inherit; }
     const b1 = document.createElement('b'); b1.textContent = nf.format(last.v);
     const b2 = document.createElement('b'); b2.textContent = nf.format(last.l);
     lede.append('Na última leitura (' + fDiaHora.format(last.t) + ') rodavam ', b1, ' ônibus em ', b2,
-      ' linhas, segundo o Olho Vivo da SPTrans. Abaixo, a série coletada a cada 5 minutos e o histórico oficial de passageiros por dia.');
+      ' linhas, segundo o Olho Vivo da SPTrans. Abaixo, a série coletada a cada 3 minutos e o histórico oficial de passageiros por dia.');
     $('f-upd').textContent = 'Última leitura: ' + fDiaHora.format(last.t) + '.';
   }
 
@@ -167,7 +176,9 @@ footer a { color: inherit; }
     const W = box.clientWidth || 600, H = 260, m = { t: 12, r: 16, b: 28, l: 0 };
     let span = d3.extent(totais, (p) => p.t);
     if (+span[0] === +span[1]) span = [new Date(+span[0] - 18e5), new Date(+span[1] + 18e5)];
-    const y = d3.scaleLinear([0, d3.max(totais, (p) => p.v) * 1.1], [H - m.b, m.t]).nice();
+    // zoom to the data range so small changes between readings are visible
+    const [vmin, vmax] = d3.extent(totais, (p) => p.v), pad = Math.max(50, (vmax - vmin) * 0.15);
+    const y = d3.scaleLinear([Math.max(0, vmin - pad), vmax + pad], [H - m.b, m.t]).nice();
     const svg = d3.select(box).append('svg').attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
     m.l = leftMargin(svg, nf.format(y.domain()[1]));
     const x = d3.scaleUtc(span, [m.l, W - m.r]);
@@ -184,19 +195,60 @@ footer a { color: inherit; }
       .attr('d', d3.area().defined((p) => !p.gap).x((p) => x(p.t)).y0(H - m.b).y1((p) => y(p.v))(series));
     svg.append('path').attr('fill', 'none').attr('stroke', acc).attr('stroke-width', 2).attr('stroke-linejoin', 'round').attr('stroke-linecap', 'round')
       .attr('d', d3.line().defined((p) => !p.gap).x((p) => x(p.t)).y((p) => y(p.v))(series));
+    // one marker per reading; smaller when readings are packed tight
+    const step = (W - m.l - m.r) / Math.max(1, (span[1] - span[0]) / 18e4);
+    const r0 = step >= 8 ? 3.5 : step >= 4 ? 2.5 : 1.5;
+    svg.append('g').selectAll('circle').data(totais).join('circle')
+      .attr('cx', (p) => x(p.t)).attr('cy', (p) => y(p.v)).attr('r', r0)
+      .attr('fill', css('--panel')).attr('stroke', acc).attr('stroke-width', 1.5);
     const last = totais[totais.length - 1];
-    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 4.5).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2);
-    const dot = svg.append('circle').attr('r', 4).attr('fill', acc).attr('visibility', 'hidden');
+    svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 5).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2);
+
+    // hover / tap: vertical rule, highlighted marker, time pill on the x axis, tooltip
+    const rule = svg.append('line').attr('y1', m.t).attr('y2', H - m.b).attr('stroke', css('--muted'))
+      .attr('stroke-dasharray', '3 3').attr('visibility', 'hidden');
+    const dot = svg.append('circle').attr('r', 6).attr('fill', acc).attr('stroke', css('--panel')).attr('stroke-width', 2).attr('visibility', 'hidden');
+    const pill = svg.append('g').attr('visibility', 'hidden');
+    const pillBg = pill.append('rect').attr('rx', 4).attr('height', 20).attr('y', H - 24).attr('fill', css('--fg'));
+    const pillTx = pill.append('text').attr('y', H - 10).attr('text-anchor', 'middle').attr('font-size', 12).attr('fill', css('--panel'));
     const tip = tooltip(box), bis = d3.bisector((p) => p.t).center;
-    svg.on('pointermove', (ev) => {
-      const p = totais[bis(totais, x.invert(d3.pointer(ev)[0]))];
-      dot.attr('cx', x(p.t)).attr('cy', y(p.v)).attr('visibility', 'visible');
+    const show = (ev) => {
+      const i = bis(totais, x.invert(d3.pointer(ev)[0])), p = totais[i], prev = totais[i - 1];
+      const px = x(p.t);
+      rule.attr('x1', px).attr('x2', px).attr('visibility', 'visible');
+      dot.attr('cx', px).attr('cy', y(p.v)).attr('visibility', 'visible');
+      pillTx.text(fHora.format(p.t));
+      const w = pillTx.node().getComputedTextLength() + 12;
+      const cx = Math.min(Math.max(px, m.l + w / 2), W - m.r - w / 2);
+      pillTx.attr('x', cx); pillBg.attr('x', cx - w / 2).attr('width', w); pill.attr('visibility', 'visible');
       tip.innerHTML = '';
       const a = document.createElement('div'); a.className = 't'; a.textContent = fDiaHora.format(p.t);
       const b = document.createElement('div'); b.textContent = nf.format(p.v) + ' ônibus · ' + nf.format(p.l) + ' linhas';
-      tip.append(a, b); tip.hidden = false;
-      const s = box.clientWidth / W; place(tip, box, x(p.t) * s, y(p.v) * s);
-    }).on('pointerleave', () => { tip.hidden = true; dot.attr('visibility', 'hidden'); });
+      tip.append(a, b);
+      if (prev && p.t - prev.t <= 15 * 6e4) {
+        const d = p.v - prev.v, c = document.createElement('div');
+        c.textContent = (d > 0 ? '+' : '') + nf.format(d) + ' desde ' + fHora.format(prev.t);
+        c.style.color = d < 0 ? css('--bad') : css('--good'); tip.append(c);
+      }
+      tip.hidden = false;
+      const s = box.clientWidth / W; place(tip, box, px * s, y(p.v) * s);
+    };
+    svg.style('touch-action', 'pan-y').on('pointermove', show).on('pointerdown', show)
+      .on('pointerleave', () => { tip.hidden = true; [dot, rule, pill].forEach((e) => e.attr('visibility', 'hidden')); });
+    drawLeituras();
+  }
+
+  function drawLeituras() {
+    const tb = $('b-leit'); tb.innerHTML = '';
+    totais.slice(-30).reverse().forEach((p, i, arr) => {
+      const prev = arr[i + 1], tr = document.createElement('tr');
+      const d = prev && p.t - prev.t <= 15 * 6e4 ? p.v - prev.v : null;
+      [[fDiaHora.format(p.t)], [nf.format(p.v), 'n'], [nf.format(p.l), 'n'], [d === null ? '—' : (d > 0 ? '+' : '') + nf.format(d), 'n']].forEach(([v, c]) => {
+        const td = document.createElement('td'); td.textContent = v; if (c) td.className = c; tr.appendChild(td);
+      });
+      if (d) tr.children[3].style.color = d < 0 ? css('--bad') : css('--good');
+      tb.appendChild(tr);
+    });
   }
 
   function drawHist() {
